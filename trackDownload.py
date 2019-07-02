@@ -6,6 +6,9 @@ import json
 import geojson
 from tqdm import tqdm
 
+# Do NOT commit the following information
+#mapillary_client_id =
+
 def save_json(area, name, gjson):
     if not os.path.exists(area):
         os.makedirs(area)
@@ -47,6 +50,11 @@ def build_bbox(coordinates):
 
 def openstreetcam():
     return {"name": "openstreetcam", "api": "http://openstreetcam.org", "tracks": "/1.0/tracks/", "data": {"bbTopLeft": 0, "bbBottomRight": 0}}
+def mapillary():
+    if mapillary_client_id is None:
+        print("We need a mapillary client id (https://www.mapillary.com/app/settings/developers)")
+        exit(-1)
+    return {"name": "mapillary", "api" : "https://a.mapillary.com/v3", "tracks": "/sequences?bbox={minx},{miny},{maxx},{maxy}&start_time={twoyears}&client_id={mapillary_client_id}".format(mapillary_client_id=mapillary_client_id)}
 
 def getApis():
     return [openstreetcam()]
@@ -78,9 +86,11 @@ def getTracks(area, bboxInformation):
             if 'bbBottomRight' in data:
                 data['bbBottomRight'] = '{lat},{lon}'.format(lat=bboxInformation[1], lon=bboxInformation[2])
             response = cached_session.post(api['api'] + api['tracks'], data=data)
-            tJson = response.json()
-            tJson = convertJson(tJson)
-            save_json(area, api['name'], tJson)
+        else:
+            response = cached_session.post(api['api'] + api['tracks'].format(minx=bbox[0], miny=bbox[1], maxx=bbox[2], maxy=bbox[3], twoyears="2017-01-01T00:00:00Z"))
+        tJson = response.json()
+        tJson = convertJson(tJson)
+        save_json(area, api['name'], tJson)
 
 def main(area):
     areas = overpass_query(area)
