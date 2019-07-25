@@ -5,15 +5,17 @@ from cachecontrol import CacheControl
 import json
 import geojson
 from tqdm import tqdm
+import time
+from defusedxml import ElementTree as ElementTree
+# This is for ElementTree.ElementTree
+import xml.etree.ElementTree as ET
 
 # Do NOT commit the following information
-#mapillary_client_id =
+mapillary_client_id = None
+
+USER_AGENT = "trackDownload/0.1 (taylor.smock@kaartgroup.com)"
 
 def save_json(area, name, gjson):
-    if not os.path.exists(area):
-        os.makedirs(area)
-    elif not os.path.isdir(area):
-        raise ValueError('{0} is not a directory', area)
     if 'type' in gjson:
         ext = '.geojson'
     else:
@@ -22,12 +24,39 @@ def save_json(area, name, gjson):
         #wfile.write(gjson)
         json.dump(gjson, wfile, indent=4, sort_keys=True)
 
-def overpass_query(area):
+def save_xml(area, name, xml_tree):
+    root = xml_tree.getroot()
+    if root.tag == "osm" or root.find("osm") is not None:
+        ext = '.osm'
+    else:
+        ext = '.xml'
+    xml_tree.write(os.path.join(area, name + ext), xml_declaration=True)
+
+def save(area, name, save_object):
+    if not os.path.exists(area):
+        os.makedirs(area)
+    elif not os.path.isdir(area):
+        raise ValueError('{0} is not a directory', area)
+    obj_type = type(save_object)
+    if obj_type is geojson.feature.FeatureCollection or obj_type is dict:
+        save_json(area, name, save_object)
+    elif obj_type is ET.ElementTree:
+        save_xml(area, name, save_object)
+    else:
+        raise ValueError("We do not support saving {}".format(obj_type))
+
+def nominatim_query(area):
+    polygon=1
     session = requests.session()
+    session.headers.update({'User-Agent': USER_AGENT})
     cached_session = CacheControl(session)
-    url = "https://nominatim.openstreetmap.org/search/{AREA}?format=geojson".format(AREA=area)
+    url = "https://nominatim.openstreetmap.org/search/{AREA}?format=geojson&polygon_geojson={polygon}".format(AREA=area, polygon=polygon)
+    print(url)
     response = cached_session.get(requests.utils.requote_uri(url))
-    areaJson = response.json()
+    try:
+        areaJson = response.json()
+    except json.decoder.JSONDecodeError as e:
+        raise ValueError("Query for {} resulted in an error ({}) and the response was:\r\n{}".format(area, e, response.text))
     return areaJson
 
 def build_bbox(coordinates):
@@ -50,14 +79,15 @@ def build_bbox(coordinates):
 
 def openstreetcam():
     return {"name": "openstreetcam", "api": "http://openstreetcam.org", "tracks": "/1.0/tracks/", "data": {"bbTopLeft": 0, "bbBottomRight": 0}}
+
 def mapillary():
     if mapillary_client_id is None:
         print("We need a mapillary client id (https://www.mapillary.com/app/settings/developers)")
         exit(-1)
-    return {"name": "mapillary", "api" : "https://a.mapillary.com/v3", "tracks": "/sequences?bbox={minx},{miny},{maxx},{maxy}&start_time={twoyears}&client_id={mapillary_client_id}".format(mapillary_client_id=mapillary_client_id)}
+    return {"name": "mapillary", "api" : "https://a.mapillary.com/v3", "tracks": "/sequences", 'params': {'bbox': '{minx},{miny},{maxx},{maxy}', 'start_time':'{twoyears}'.format(twoyears='2017-01-01T00:00:00Z'), "client_id": str(mapillary_client_id)}}
 
 def getApis():
-    return [openstreetcam()]
+    return [openstreetcam(), mapillary()]
 
 def convertJson(cJson):
     features = []
@@ -77,6 +107,7 @@ def convertJson(cJson):
 def getTracks(area, bboxInformation):
     apis = getApis()
     session = requests.session()
+    session.headers.update({'User-Agent': USER_AGENT})
     cached_session = CacheControl(session)
     for api in apis:
         if 'data' in api:
@@ -86,25 +117,73 @@ def getTracks(area, bboxInformation):
             if 'bbBottomRight' in data:
                 data['bbBottomRight'] = '{lat},{lon}'.format(lat=bboxInformation[1], lon=bboxInformation[2])
             response = cached_session.post(api['api'] + api['tracks'], data=data)
+            tJson = response.json()
         else:
-            response = cached_session.post(api['api'] + api['tracks'].format(minx=bbox[0], miny=bbox[1], maxx=bbox[2], maxy=bbox[3], twoyears="2017-01-01T00:00:00Z"))
-        tJson = response.json()
-        tJson = convertJson(tJson)
-        save_json(area, api['name'], tJson)
+            turl = api['api'] + api['tracks']
+            params = api['params']
+            params['bbox'] = params['bbox'].format(minx=bboxInformation[0], miny=bboxInformation[1], maxx=bboxInformation[2], maxy=bboxInformation[3])
+            response = cached_session.get(turl, params=params)
+            try:
+                tJson = response.json()
+            except json.decoder.JSONDecodeError as e:
+                print(response.url)
+                print(response.text)
+                raise e
+            while 'next' in response.links:
+                response = cached_session.get(response.links['next']['url'])
+                tJson['features'] = tJson['features'] + response.json()['features']
+        if (response.status_code != requests.codes.ok):
+            raise ValueError("{} gave us a status code of {}".format(response.url, response.status_code))
+        if api['name'] == 'openstreetcam':
+            tJson = convertJson(tJson)
+        save(area, api['name'], tJson)
+
+def overpass_query(query):
+    session = requests.session()
+    session.headers.update({'User-Agent': USER_AGENT})
+    cached_session = CacheControl(session)
+    response = cached_session.get("http://overpass-api.de/api/interpreter", params={'data': query})
+    while (response.status_code == requests.codes.too_many_requests):
+        time.sleep(10)
+        response = cached_session.get("http://overpass-api.de/api/interpreter", params={'data': query})
+
+    xml = response.text
+
+    if (response.status_code != requests.codes.ok):
+        raise ValueError("We got a bad response code of {} for {} which resulted in:\r\n{}".format(response.status_code, query, xml))
+    content_type = response.headers.get('content-type')
+    if content_type == 'application/osm3s+xml':
+        return ET.ElementTree(ElementTree.fromstring(xml))
+    else:
+        raise ValueError("Unexpected content type ({}) from the query: {}".format(content_type, query))
+
 
 def main(area):
-    areas = overpass_query(area)
+    areas = nominatim_query(area)
     nodes = {}
     for feature in areas['features']:
         if 'type' in feature and feature['type'] == 'Point':
             nodes[str(feature['id'])] = feature
-    tid = 0
-    for feature in tqdm(areas['features'], position=0):
-        if 'bbox' in feature:
-            bboxInformation = feature['bbox']
-            getTracks(area + str(tid), bboxInformation)
-            save_json(area + str(tid), 'boundary', feature)
-            tid += 1
+    feature = areas['features'][0]
+    if 'bbox' in feature:
+        bboxInformation = feature['bbox']
+        getTracks(area, bboxInformation)
+        save(area, 'boundary', feature)
 
-#main("Grand Junction")
-main("Brașov")
+    area_id = feature['properties']['osm_id']
+    if feature['properties']['osm_type'] == 'relation':
+        area_id += 3600000000
+    elif feature['properties']['osm_type'] == 'way':
+        area_id += 2400000000
+
+    road_blacklist = ["track", "path", "living_street", "residential", "service", "footway", "cycleway", "steps", "proposed", "motorway_link"]
+    roads = overpass_query("""[out:xml];area({area_id}) -> .searchArea; ( way["highway"]["highway"!~"{road_blacklist}"](area.searchArea); ); (._;>;); out meta;""".format(osm_type=feature['properties']['osm_type'], area_id=area_id, road_blacklist = "|".join(road_blacklist)))
+    save(area, 'roads', roads)
+
+    high_priority_roads = overpass_query("""[out:xml];area({area_id}) -> .searchArea; ( way["highway"~"motorway|trunk|primary"](area.searchArea); ); (._;>;); out meta;""".format(osm_type=feature['properties']['osm_type'], area_id=area_id))
+    save(area, 'high_priority_roads', high_priority_roads)
+
+if __name__ == "__main__":
+    import sys
+    for item in sys.argv[1:]:
+        main(item)
