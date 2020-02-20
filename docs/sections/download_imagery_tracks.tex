@@ -1,0 +1,14 @@
+\section{Download Imagery Tracks}
+There are several executable files.
+\begin{enumerate}
+\item download\_imagery\_tracks/trackDownload.py \label{downloadimagerytracks:specific}
+\item download\_imagery\_tracks/trackDownloadGeneric.py \label{downloadimagerytracks:generic}
+\item download\_imagery\_tracks/otherDownload.py \label{downloadimagerytracks:other}
+\item download\_imagery\_tracks/overpassDownload.py \label{downloadimagerytracks:overpass}
+\end{enumerate}
+
+Item \ref{downloadimagerytracks:other} was never used by me, but it was written by Zack, and it can be used.
+
+Item \ref{downloadimagerytracks:overpass} is used to download data from Overpass. Its designed to be used for geographically diverse, but similar projects (e.g., we are taking OSM GPS traces and seeing where there are probable roads, but we want to ignore waterrways, military bases, and so on).
+
+Item \ref{downloadimagerytracks:generic} and \ref{downloadimagerytracks:specific} are very similar. The major differences is with \ref{downloadimagerytracks:specific}, you must edit the file for each separate area, although you can have several lines calling different areas. You should still edit them so that they are what each project needs.
