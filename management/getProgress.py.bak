@@ -1,0 +1,117 @@
+#!/usr/bin/env python3
+import json
+import requests
+import string
+import pyexcel_ods
+import ssl
+from cachecontrol import CacheControl
+
+def getColumn(data, columnHeader):
+    if columnHeader in data:
+        return data.index(columnHeader)
+    else:
+        data.append(columnHeader)
+        return len(data) + 1
+
+def getDataUrl(url):
+    if "maproulette" in url:
+        return "https://maproulette.org/api/v2/data/challenge/{pid}"
+    else:
+        return url[:url.index('/project/')] + "/api/v1/stats/project/{pid}"
+
+def getProjectInformationUrl(url):
+    if not "maproulette" in url:
+        return getDataUrl(url)
+    else:
+        return "https://maproulette.org/api/v2/challenge/{pid}"
+
+def getProjectId(url):
+    return url[url.rfind('/'):].strip('/')
+
+def countTasks(task_data):
+    count = 0
+    if 'features' in task_data:
+        for i in task_data['features']:
+            count += 1
+    return count
+
+def getTaskUrl(url):
+    if "maproulette" in url:
+        return ""
+    else:
+        return url[:url.index('/project')] + '/api/v1/project/{pid}/tasks?as_file=false'
+
+def expandRow(row, columns):
+    maxColumn = 0
+    for column in columns:
+        if columns[column] > maxColumn:
+            maxColumn = columns[column]
+    while len(row) < maxColumn + 1:
+        row.append("")
+    return row
+
+def getProgress(url, row, columns):
+    dataUrl = getDataUrl(url)
+    projectId = getProjectId(url)
+    row = expandRow(row, columns)
+
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    session = CacheControl(requests.session())
+    with session.get(dataUrl.format(pid=projectId)) as response:
+        json_data = response.json()
+
+    if 'percentMapped' in json_data and 'percentValidated' in json_data:
+        taskUrl = getTaskUrl(url)
+        with session.get(taskUrl.format(pid=projectId)) as response:
+            task_data = response.json()
+        complete = json_data['percentMapped'] / 100
+        validated = json_data['percentValidated'] / 100
+        try:
+            if row[columns['taskCount']] == "":
+                totalTasks = countTasks(task_data)
+                row[columns['taskCount']] = totalTasks
+        except IndexError as e:
+            print(e)
+            print(row)
+            print(columns)
+            exit(-1)
+        row[columns['completed']] = complete
+        row[columns['validated']] = validated
+    elif len(json_data) > 0 and 'actions' in json_data[0] and 'total' in json_data[0]['actions'] and 'available' in json_data[0]['actions']:
+        total = json_data[0]['actions']['total']
+        available = json_data[0]['actions']['available']
+        row[columns['completed']] = 1 - float(available) / total
+        row[columns['taskCount']] = total
+    else:
+        print(dataUrl.format(pid=projectId))
+        print(json_data)
+
+    with session.get(getProjectInformationUrl(url).format(pid=projectId), verify=False) as response:
+        json_data = response.json()
+    if 'created' in json_data:
+        row[columns['taskCreated']] = json_data['created']
+    return row
+
+def run(data):
+    columns = {}
+    columns['validated'] = getColumn(data[0], 'Percent Validated')
+    columns['completed'] = getColumn(data[0], 'Percent Complete')
+    columns['taskCount'] = getColumn(data[0], 'Total Tasks')
+    columns['taskCreated']= getColumn(data[0], 'Created')
+    columns['url'] = getColumn(data[0], 'URL')
+    columns['project'] = getColumn(data[0], 'Project')
+
+    for row in data:
+        if data.index(row) == 1 or len(row) < columns['url'] + 1: continue
+        url = row[columns['url']]
+        if ("http" in url):
+            row = getProgress(url, row, columns)
+    return data
+
+if __name__ == "__main__":
+    FILE = 'Projects_NOMACRO.ods'
+    data = pyexcel_ods.get_data(FILE)
+    data['Projects'] = run(data['Projects'])
+    pyexcel_ods.save_data(FILE, data)

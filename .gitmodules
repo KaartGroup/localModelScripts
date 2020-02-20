@@ -1,0 +1,6 @@
+[submodule "management/scripts/ogr2osm"]
+	path = management/scripts/ogr2osm
+	url = https://github.com/pnorman/ogr2osm
+[submodule "obtain_government_data/ogr2osm"]
+	path = obtain_government_data/ogr2osm
+	url = https://github.com/pnorman/ogr2osm
