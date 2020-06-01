@@ -211,4 +211,8 @@ def main(area):
         save(area, "boundary", feature)
 
 
-main("Albania")
+if __name__ == "__main__":
+    import sys
+
+    for item in sys.argv[1:]:
+        main(item)
