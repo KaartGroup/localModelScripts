@@ -3,16 +3,18 @@
 
 import os
 import time
-import requests
 import argparse
-from cachecontrol import CacheControl
 import json
-import geojson
-from tqdm import tqdm
-from defusedxml import ElementTree as ElementTree
+import datetime
 
 # This is for ElementTree.ElementTree
 import xml.etree.ElementTree as ET
+import requests
+from cachecontrol import CacheControl
+import geojson
+from tqdm import tqdm
+from defusedxml import ElementTree
+
 
 # Do NOT commit the following information
 def read_config(config=".config"):
@@ -152,9 +154,13 @@ def mapillary():
         "tracks": "/sequences",
         "params": {
             "bbox": "{minx},{miny},{maxx},{maxy}",
-            "start_time": "2019-08-21T00:00:00Z",
-            "end_time": "2019-08-22T00:00:00Z",
-            "usernames": "kaart5",
+            "start_time": (
+                datetime.datetime.utcnow() - datetime.timedelta(days=365 * 5)
+            ).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "end_time": datetime.datetime.utcnow().strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            ),
+            # "usernames": "kaart5",
             "client_id": str(mapillary_client_id),
         },
     }
@@ -174,9 +180,13 @@ def convertJson(cJson):
             pointList = []
             if "track" in item:
                 for coordinates in item["track"]:
-                    pointList.append((float(coordinates[1]), float(coordinates[0])))
+                    pointList.append(
+                        (float(coordinates[1]), float(coordinates[0]))
+                    )
             lineString = geojson.LineString(pointList)
-            features.append(geojson.Feature(geometry=lineString, properties=properties))
+            features.append(
+                geojson.Feature(geometry=lineString, properties=properties)
+            )
     return geojson.FeatureCollection(features)
 
 
@@ -196,7 +206,9 @@ def getTracks(area, bboxInformation):
                 data["bbBottomRight"] = "{lat},{lon}".format(
                     lat=bboxInformation[1], lon=bboxInformation[2]
                 )
-            response = cached_session.post(api["api"] + api["tracks"], data=data)
+            response = cached_session.post(
+                api["api"] + api["tracks"], data=data
+            )
             tJson = response.json()
         else:
             turl = api["api"] + api["tracks"]
@@ -208,6 +220,7 @@ def getTracks(area, bboxInformation):
                 maxy=bboxInformation[3],
             )
             response = cached_session.get(turl, params=params)
+            print(response.url)
             while response.status_code != requests.codes.ok:
                 time.sleep(1)
                 response = cached_session.get(turl, params=params)
@@ -224,7 +237,9 @@ def getTracks(area, bboxInformation):
                     time.sleep(1)
                     response = cached_session.get(next_url)
                 try:
-                    tJson["features"] = tJson["features"] + response.json()["features"]
+                    tJson["features"] = (
+                        tJson["features"] + response.json()["features"]
+                    )
                 except json.decoder.JSONDecodeError as e:
                     print(response.url)
                     print(response.text)
@@ -343,4 +358,4 @@ def main(area):
     # road_tasks(area, feature)
 
 
-main("Albania")
+main("Mesa County, Colorado")
