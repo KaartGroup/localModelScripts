@@ -3,6 +3,7 @@
 
 import os
 import time
+import datetime
 import requests
 import argparse
 from cachecontrol import CacheControl
@@ -101,7 +102,6 @@ def nominatim_query(area):
     url = "https://nominatim.openstreetmap.org/search/{AREA}?format=geojson&polygon_geojson={polygon}".format(
         AREA=area, polygon=polygon
     )
-    print(url)
     response = cached_session.get(requests.utils.requote_uri(url))
     try:
         areaJson = response.json()
@@ -154,8 +154,13 @@ def mapillary():
         "tracks": "/sequences",
         "params": {
             "bbox": "{minx},{miny},{maxx},{maxy}",
-            "start_time": "2019-04-14T00:00:00Z",
-            "end_time": "2019-04-23T00:00:00Z",
+            "start_time": (
+                datetime.datetime.utcnow() - datetime.timedelta(days=365 * 5)
+            ).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "end_time": datetime.datetime.utcnow().strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            ),
+            # "usernames": "kaart5",
             "client_id": str(mapillary_client_id),
         },
     }
@@ -175,9 +180,13 @@ def convertJson(cJson):
             pointList = []
             if "track" in item:
                 for coordinates in item["track"]:
-                    pointList.append((float(coordinates[1]), float(coordinates[0])))
+                    pointList.append(
+                        (float(coordinates[1]), float(coordinates[0]))
+                    )
             lineString = geojson.LineString(pointList)
-            features.append(geojson.Feature(geometry=lineString, properties=properties))
+            features.append(
+                geojson.Feature(geometry=lineString, properties=properties)
+            )
     return geojson.FeatureCollection(features)
 
 
@@ -197,7 +206,9 @@ def getTracks(area, bboxInformation):
                 data["bbBottomRight"] = "{lat},{lon}".format(
                     lat=bboxInformation[1], lon=bboxInformation[2]
                 )
-            response = cached_session.post(api["api"] + api["tracks"], data=data)
+            response = cached_session.post(
+                api["api"] + api["tracks"], data=data
+            )
             tJson = response.json()
         else:
             turl = api["api"] + api["tracks"]
@@ -209,6 +220,7 @@ def getTracks(area, bboxInformation):
                 maxy=bboxInformation[3],
             )
             response = cached_session.get(turl, params=params)
+            print(response.url)
             while response.status_code != requests.codes.ok:
                 time.sleep(1)
                 response = cached_session.get(turl, params=params)
@@ -225,7 +237,9 @@ def getTracks(area, bboxInformation):
                     time.sleep(1)
                     response = cached_session.get(next_url)
                 try:
-                    tJson["features"] = tJson["features"] + response.json()["features"]
+                    tJson["features"] = (
+                        tJson["features"] + response.json()["features"]
+                    )
                 except json.decoder.JSONDecodeError as e:
                     print(response.url)
                     print(response.text)
