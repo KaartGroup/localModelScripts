@@ -1,0 +1,12 @@
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "download_imagery_tracks"
+    schedule:
+      interval: "daily"
+    rebase-strategy: auto
+  - package-ecosystem: "pip"
+    directory: "get_country_boundary"
+    schedule:
+      interval: "daily"
+    rebase-strategy: auto
