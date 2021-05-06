@@ -4,7 +4,7 @@ chardet==3.0.4
 defusedxml==0.7.1
 geojson==2.5.0
 idna==2.10
-msgpack==1.0.0
+msgpack==1.0.2
 requests==2.25.0
 tqdm==4.54.0
 urllib3==1.26.4
